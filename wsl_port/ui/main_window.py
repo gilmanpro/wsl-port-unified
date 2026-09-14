@@ -548,7 +548,7 @@ class MainWindow:
         r += 1
         self.mcp_key_var = tk.StringVar()
         r = _row(card_mcp, r, "Token:", lambda p: ttk.Entry(p, textvariable=self.mcp_key_var, width=20, show="*"),
-                 "Si vacio, se genera uno aleatorio al guardar.")
+                 "Se conserva el actual si lo dejas vacio.")
         self.mcp_exec_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(card_mcp, text="Exponer wsl_exec (RCE en distros)",
                         variable=self.mcp_exec_var, bootstyle="round-toggle").grid(
@@ -625,12 +625,24 @@ class MainWindow:
             self.web_enabled_var.set(cfg.ui.web_panel_enabled)
             self.web_port_var.set(str(cfg.ui.web_panel_port))
             self.web_bind_var.set(cfg.ui.web_panel_bind)
+            # Clave actual pre-cargada (campo enmascarado): evita que el
+            # usuario salve con vacio y la app regenere otra clave distinta.
+            cur_web = ""
+            try:
+                from wsl_port.vendor.port_forwarder.utils.secrets import SecretsStore
+                _sec = SecretsStore()
+                if _sec.check("web_panel_token"):
+                    cur_web = _sec.get("web_panel_token") or ""
+            except Exception:  # noqa: BLE001
+                pass
+            self.web_pw_var.set(cur_web or cfg.ui.web_panel_token or "")
             self.api_enabled_var.set(cfg.api.enabled)
             self.api_port_var.set(str(cfg.api.port))
             self.mcp_enabled_var.set(cfg.mcp.enabled)
             self.mcp_transport_var.set(cfg.mcp.transport)
             self.mcp_port_var.set(str(cfg.mcp.port))
             self.mcp_token_var.set(cfg.mcp.token_required)
+            self.mcp_key_var.set(cfg.mcp.token or "")
             self.mcp_exec_var.set(bool(getattr(cfg.mcp, "expose_exec", True)))
             self.wsl_exe_var.set(cfg.windows.wsl_exe)
             self.ssh_exe_var.set(cfg.windows.ssh_exe)
@@ -737,10 +749,17 @@ class MainWindow:
             cfg.ui.metrics_retention_days = int(self.metrics_retention_var.get() or 30)
             web_on = self.web_enabled_var.get()
             web_pw = self.web_pw_var.get()
-            if web_on and not web_pw:
+            had_web_token = bool(cfg.ui.web_panel_token)
+            if web_on and not web_pw and not had_web_token:
+                try:
+                    from wsl_port.vendor.port_forwarder.utils.secrets import SecretsStore as _Sec
+                    had_web_token = _Sec().check("web_panel_token")
+                except Exception:  # noqa: BLE001
+                    pass
+            if web_on and not web_pw and not had_web_token:
                 messagebox.showerror("Ajustes",
                     "El panel web debe tener una clave (es obligatoria).\n"
-                    "Escribela en 'Clave' o desactiva el panel.")
+                    "Escribela en 'Clave' o pulsa 'Generar clave fuerte'.")
                 return
             cfg.ui.web_panel_enabled = web_on
             cfg.ui.web_panel_port = int(self.web_port_var.get() or 8780)
@@ -770,9 +789,15 @@ class MainWindow:
             cfg.api.port = int(self.api_port_var.get() or 8781)
             mcp_on = self.mcp_enabled_var.get()
             mcp_token = self.mcp_key_var.get()
-            if mcp_on and self.mcp_token_var.get() and not mcp_token:
+            # Solo se genera un token nuevo si NO existe ninguno: antes la app
+            # regeneraba uno al azar en cada guardado y el MCP publicado quedaba
+            # con una clave distinta a la del usuario.
+            mcp_generated = False
+            if (mcp_on and self.mcp_token_var.get() and not mcp_token
+                    and not cfg.mcp.token):
                 import secrets
                 mcp_token = secrets.token_urlsafe(24)
+                mcp_generated = True
             cfg.mcp.enabled = mcp_on
             cfg.mcp.transport = self.mcp_transport_var.get()
             cfg.mcp.port = int(self.mcp_port_var.get() or 8782)
@@ -789,7 +814,7 @@ class MainWindow:
             _set_autostart(self.auto_start_var.get())
             store.save()
             msg = "Ajustes guardados.\nEl tema se aplica al reiniciar."
-            if mcp_on and self.mcp_token_var.get() and not self.mcp_key_var.get():
+            if mcp_generated:
                 msg += f"\n\nToken MCP generado: {mcp_token}"
             if self.auto_start_var.get():
                 msg += "\n\nAutoarranque con Windows: ACTIVADO."

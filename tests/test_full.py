@@ -727,6 +727,85 @@ def test_gui_save_settings(monkeypatch, gui):
     assert saved == [False]
 
 
+class _RealCfgStore:
+    """Store con AppConfig real para probar la NO regeneracion de claves."""
+    def __init__(self):
+        from wsl_port.vendor.port_forwarder.core.config import AppConfig
+        self.cfg = AppConfig()
+        self.saves = 0
+
+    def save(self):
+        self.saves += 1
+
+
+def test_gui_save_no_regenera_token_mcp_existente(monkeypatch, gui):
+    """Bug 14/09: cada Guardar ajustes regeneraba el token MCP (el panel
+    publicado quedaba con otra clave). Con token existente y campo vacio,
+    el token debe conservarse intacto."""
+    store = _RealCfgStore()
+    store.cfg.mcp.enabled = True
+    store.cfg.mcp.token_required = True
+    store.cfg.mcp.token = "CLAVE-DEL-USUARIO-9e1f8a"
+    monkeypatch.setattr(core, "pf_store", lambda: store)
+    monkeypatch.setattr("wsl_port.ui.main_window._set_autostart", lambda a: None)
+    monkeypatch.setattr("tkinter.messagebox.showinfo", lambda *a, **k: None)
+    gui.web_enabled_var.set(False)
+    gui.mcp_enabled_var.set(True)
+    gui.mcp_token_var.set(True)
+    gui.mcp_key_var.set("")          # usuario deja el campo vacio
+    gui._save_settings()
+    assert store.cfg.mcp.token == "CLAVE-DEL-USUARIO-9e1f8a"
+    assert store.saves == 1
+
+
+def test_gui_save_panel_no_bloquea_con_clave_ya_configurada(monkeypatch, gui):
+    """Con clave del panel ya guardada (vault), un guardado con el campo
+    vacio no debe bloquear ni pisarla."""
+    store = _RealCfgStore()
+    store.cfg.ui.web_panel_enabled = True
+    store.cfg.ui.web_panel_token = ""
+    monkeypatch.setattr(core, "pf_store", lambda: store)
+    monkeypatch.setattr(
+        "wsl_port.vendor.port_forwarder.utils.secrets.SecretsStore.check",
+        lambda self, ref: True)
+    set_calls = []
+    monkeypatch.setattr(
+        "wsl_port.vendor.port_forwarder.utils.secrets.SecretsStore.set",
+        lambda self, ref, val: set_calls.append((ref, val)))
+    monkeypatch.setattr("wsl_port.ui.main_window._set_autostart", lambda a: None)
+    monkeypatch.setattr("tkinter.messagebox.showinfo", lambda *a, **k: None)
+    shown = []
+    monkeypatch.setattr("tkinter.messagebox.showerror",
+                        lambda *a, **k: shown.append(a))
+    gui.web_enabled_var.set(True)
+    gui.web_pw_var.set("")           # campo vacio: ya hay clave en vault
+    gui._save_settings()
+    assert shown == []               # no bloqueado
+    assert set_calls == []           # no pisada
+    assert store.cfg.ui.web_panel_enabled is True
+
+
+def test_gui_save_mcp_genera_token_solo_si_no_hay(monkeypatch, gui):
+    """El generador aleatorio sigue disponible para el primer arranque
+    (sin token configurado en ninguna parte)."""
+    store = _RealCfgStore()
+    store.cfg.mcp.enabled = True
+    store.cfg.mcp.token_required = True
+    store.cfg.mcp.token = ""         # ninguno
+    monkeypatch.setattr(core, "pf_store", lambda: store)
+    monkeypatch.setattr("wsl_port.ui.main_window._set_autostart", lambda a: None)
+    infos = []
+    monkeypatch.setattr("tkinter.messagebox.showinfo",
+                        lambda *a, **k: infos.append(a))
+    gui.web_enabled_var.set(False)
+    gui.mcp_enabled_var.set(True)
+    gui.mcp_token_var.set(True)
+    gui.mcp_key_var.set("")
+    gui._save_settings()
+    assert store.cfg.mcp.token       # generado y guardado
+    assert any("Token MCP generado" in str(i) for i in infos)
+
+
 def test_gui_shutdown_all_distros(monkeypatch, gui):
     from wsl_port.ui.main_window import MainWindow
     monkeypatch.setattr(core, "shutdown_all", lambda: {"ok": True})
