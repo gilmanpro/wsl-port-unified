@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -101,3 +101,7 @@ metrics.db
 
 # Informe de auditoria local (contiene IPs/credenciales): no subir
 security/
+
+# artefactos de compilacion
+build/
+ejecutables/
