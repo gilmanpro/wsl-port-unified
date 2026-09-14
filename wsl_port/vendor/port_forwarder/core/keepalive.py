@@ -114,6 +114,7 @@ class DistroKeepalive:
         self._lock = threading.Lock()
         self._last_check = 0.0
         self._wslconfig_done = False
+        self._born = self.clock()
         self.revived_count = 0
         self.last_revived: dict[str, float] = {}
 
@@ -235,11 +236,20 @@ class DistroKeepalive:
             self._kill_orphan_holders()
         if not ka.enabled:
             return
+        # Gracia de arranque: tras el login de Windows no se toca NADA de WSL
+        # (ni revividos, ni holders, ni el --list). Varios wsl.exe de arranque
+        # concurrentes es justo lo que atraviesa wslservice (colgado del
+        # 14/09: 3 distros + probes hostname -I simultaneos al boot).
+        grace = float(getattr(ka, "startup_grace_seconds", 60))
+        if now - self._born < grace:
+            return
         try:
             states = self.list_states()
         except (OSError, subprocess.SubprocessError) as e:
             log.warning("keepalive: wsl --list fallo: %s", e)
             return
+        # Revividos escalonados: maximo N arranques de distro por ciclo.
+        budget = max(1, int(getattr(ka, "max_revives_per_cycle", 1)))
         for name, state in states.items():
             if name.lower().startswith(EXCLUDE_PREFIXES):
                 continue
@@ -247,6 +257,9 @@ class DistroKeepalive:
                 self.kill_holder(name)
                 continue
             if state != "Running":
+                if budget <= 0:
+                    continue
+                budget -= 1
                 self.revive(name)
             else:
                 self.ensure_holder(name)

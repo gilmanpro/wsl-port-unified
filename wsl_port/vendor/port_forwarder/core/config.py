@@ -217,10 +217,17 @@ class Keepalive:
     - enabled: watchdog activo (revive caidas + sesiones persistentes).
     - stopped_by_user: distros apagadas EXPLICITAMENTE por boton; son las
       unicas que el watchdog respeta y no revive.
+    - startup_grace_seconds: tras arrancar la app, no enciende NADA de WSL
+      (arranques/holders/probes) durante este margen. Evita la tormenta de
+      wsl.exe concurrentes al login, que puede atravesar wslservice.
+    - max_revives_per_cycle: como mucho N arranques de distro por ciclo
+      (revividos escalonados, no en paralelo).
     """
     enabled: bool = True
     check_interval_seconds: int = 20
     stopped_by_user: list[str] = field(default_factory=list)
+    startup_grace_seconds: int = 60
+    max_revives_per_cycle: int = 1
 
 
 @dataclass

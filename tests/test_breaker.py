@@ -17,6 +17,35 @@ def clean_breaker():
     sa.reset_breaker()
 
 
+def test_breaker_cooldown_escala(clean_breaker, monkeypatch):
+    """Cada apertura sucesiva duplica el enfriamiento (30->60->120... tope 300)
+    para no martillar un wslservice atrancado; reset_breaker lo baja."""
+    monkeypatch.setattr(sa, "_soft_recovery", lambda: None)
+    sa._breaker_open_now()
+    assert sa.breaker_state()["cooldown"] == 30
+    sa._breaker_open_now()
+    assert sa.breaker_state()["cooldown"] == 60
+    sa._breaker_open_now()
+    sa._breaker_open_now()
+    sa._breaker_open_now()
+    assert sa.breaker_state()["cooldown"] == 300  # tope
+    sa.reset_breaker()
+    st = sa.breaker_state()
+    assert st["cooldown"] == 30 and st["strikes"] == 0
+
+
+@pytest.mark.skipif(sa.sys.platform != "win32", reason="soft recovery es de Windows")
+def test_soft_recovery_tras_tres_fallos(clean_breaker):
+    """A la tercera apertura seguida se intenta 'wsl --shutdown' (watchdog)."""
+    with mock.patch.object(sa.subprocess, "run") as fake_run:
+        sa._breaker_open_now()
+        sa._breaker_open_now()
+        assert fake_run.call_count == 0
+        sa._breaker_open_now()
+        assert any("--shutdown" in str(c) for c in fake_run.call_args_list)
+    sa.reset_breaker()
+
+
 def test_circuit_breaker_abre_al_colgarse(clean_breaker):
     """Si un comando wsl.exe se cuelga, el breaker abre por 30s."""
     proc = mock.Mock()

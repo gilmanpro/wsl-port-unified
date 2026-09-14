@@ -172,6 +172,7 @@ def ka_store(monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     monkeypatch.setattr(sys, "platform", "win32")
     k._wslconfig_done = True  # no tocar .wslconfig real
+    k._born = 0.0             # gracia de arranque ya cumplida
     return k, store, metrics, spawned
 
 
@@ -246,6 +247,32 @@ def test_cycle_holder_muerto_se_recupera(ka_store):
     # Ubuntu seguia Running en el snapshot pero su holder estaba muerto ->
     # debe haberse re-creado el holder (2 spawns para Ubuntu)
     assert sum(1 for c in spawned if "Ubuntu-26.04" in c) == 2
+
+
+def test_cycle_gracia_de_arranque_no_toca_wsl(ka_store):
+    """Recien nacida la app (login de Windows) el watchdog NO lanza nada:
+    los arranques concurrentes de wsl.exe al boot pueden atravesar wslservice."""
+    k, store, metrics, spawned = ka_store
+    k._born = k.clock()  # "ahora mismo" se arranco la app
+    k.cycle()
+    assert spawned == []
+    k._born = 0.0        # gracia cumplida
+    k._last_check = 0.0
+    k.cycle()
+    assert spawned       # ahora si actua
+
+
+def test_cycle_revividos_escalonados(ka_store, monkeypatch):
+    """Con varias distros caidas, como mucho 1 revive por ciclo."""
+    k, store, metrics, spawned = ka_store
+    monkeypatch.setattr(k, "list_states", lambda: {
+        "d1": "Stopped", "d2": "Stopped", "d3": "Stopped"})
+    k._last_check = 0.0
+    k.cycle()
+    assert k.revived_count == 1
+    k._last_check = 0.0
+    k.cycle()
+    assert k.revived_count == 2
 
 
 # ------------------------------- integracion config/supervisor -------------------------------
