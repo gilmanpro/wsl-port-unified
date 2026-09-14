@@ -1,10 +1,10 @@
-﻿# wsl-port — WSL + Internet en 1 clic
+﻿# wsl-port-unified — WSL + Internet en 1 clic
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](#requisitos)
 [![Integracion](https://img.shields.io/badge/Integra-WSL%20Manager%20%2B%20Port%20Forwarding-2ea44f)](#caracteristicas-integradas)
 [![Plataforma](https://img.shields.io/badge/Plataforma-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)](#requisitos)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-94%2F94%20passed-2ea44f)](#tests)
+[![Tests](https://img.shields.io/badge/Tests-130%2F130%20passed-2ea44f)](#tests)
 [![Open Source](https://img.shields.io/badge/Open%20Source-Yes-2ea44f)](LICENSE)
 
 > **Publica cualquier servicio de tu WSL en Internet con 1 clic.** wsl-port une **WSL Manager** (tus distros) y **Port Forwarding Manager** (tuneles al VPS) en una sola ventana y un solo comando.
@@ -257,7 +257,7 @@ La GUI tiene 6 pestanas:
 ## Estructura
 
 ```
-wsl-port/
+wsl-port-unified/
 ├── run.py                  # Entry point (GUI / headless)
 ├── pyproject.toml          # Configuracion del paquete
 ├── README.md               # Este archivo
@@ -271,8 +271,7 @@ wsl-port/
 │   │   ├── main_window.py  # GUI (6 pestanas + ajustes)
 │   │   └── publish_tab.py  # Asistente Publicar
 │   └── vendor/             # Auto-generado (wsl_manager + port_forwarder)
-├── tests/
-│   └── test_publish.py     # Tests unitarios (7 tests)
+├── tests/                  # Suite completa (130 tests: core, CLI, GUI, web, MCP)
 ├── docs/
 │   ├── REPORTE-TESTS-COMPLETO.md
 │   ├── REPORTE-TESTS-WEB-PANEL.md
@@ -301,8 +300,8 @@ wsl-port/
 ## Instalacion
 
 ```bash
-git clone https://github.com/gilmanpro/wsl-port
-cd wsl-port
+git clone https://github.com/gilmanpro/wsl-port-unified
+cd wsl-port-unified
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
