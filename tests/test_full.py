@@ -806,6 +806,21 @@ def test_gui_save_mcp_genera_token_solo_si_no_hay(monkeypatch, gui):
     assert any("Token MCP generado" in str(i) for i in infos)
 
 
+def test_orden_secciones_vps_antes_tunnels():
+    """VPS es la seccion 1 y Tunnels la 2, tanto en la GUI como en el panel
+    web (el destino debe definirse antes que el tunel)."""
+    import inspect
+    from wsl_port.ui import main_window
+    src = inspect.getsource(main_window.MainWindow._build_tunnels_tab)
+    assert src.index("1. Servidores VPS") < src.index("2. Tunnels SSH")
+    from wsl_port.vendor.port_forwarder.web.server import DASHBOARD_HTML
+    assert "1. Servidores VPS" in DASHBOARD_HTML
+    assert "2. Tunnels SSH" in DASHBOARD_HTML
+    assert (DASHBOARD_HTML.index("1. Servidores VPS")
+            < DASHBOARD_HTML.index("2. Tunnels SSH"))
+    assert DASHBOARD_HTML.index('id="vps-body"') < DASHBOARD_HTML.index('id="tun-body"')
+
+
 def test_gui_shutdown_all_distros(monkeypatch, gui):
     from wsl_port.ui.main_window import MainWindow
     monkeypatch.setattr(core, "shutdown_all", lambda: {"ok": True})
