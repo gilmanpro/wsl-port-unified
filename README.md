@@ -300,14 +300,21 @@ wsl-port-unified/
 ## Instalacion
 
 ```bash
+# 1. Clonar y crear entorno (Python 3.11+)
 git clone https://github.com/gilmanpro/wsl-port-unified
 cd wsl-port-unified
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .
-# o para desarrollo:
-pip install -e ".[dev]"
+
+# 2. Instalar (CLI + GUI; agrega [dev] para tests y [mcp] para el servidor MCP)
+pip install -e ".[dev,mcp]"
+
+# 3. Arrancar
+.venv\Scripts\wsl-port.exe status          # CLI: estado integrado
+python run.py                              # GUI en system tray (o doble clic en wsl-port.vbs)
 ```
+
+Autoarranque con Windows (oculto, sin consola): registra `wscript.exe "<ruta>\wsl-port.vbs"` en `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
 
 ---
 
