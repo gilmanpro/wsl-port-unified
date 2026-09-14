@@ -806,18 +806,28 @@ def test_gui_save_mcp_genera_token_solo_si_no_hay(monkeypatch, gui):
     assert any("Token MCP generado" in str(i) for i in infos)
 
 
-def test_orden_secciones_vps_antes_tunnels():
-    """VPS es la seccion 1 y Tunnels la 2, tanto en la GUI como en el panel
-    web (el destino debe definirse antes que el tunel)."""
+def test_pestanas_separadas_vps_y_tunnels():
+    """VPS y Tunnels son pestANAS independientes (VPS primero) tanto en la
+    GUI como en el panel web."""
+    from pathlib import Path
     import inspect
     from wsl_port.ui import main_window
-    src = inspect.getsource(main_window.MainWindow._build_tunnels_tab)
-    assert src.index("1. Servidores VPS") < src.index("2. Tunnels SSH")
+    src = inspect.getsource(main_window.MainWindow._build_tabs) if hasattr(
+        main_window.MainWindow, "_build_tabs") else Path(
+        main_window.__file__).read_text(encoding="utf-8")
+    assert 'nb.add(v_tab, text="  VPS  ")' in src
+    assert 'nb.add(t_tab, text="  Tunnels SSH  ")' in src
+    assert src.index('text="  VPS  "') < src.index('text="  Tunnels SSH  "')
+    vs = inspect.getsource(main_window.MainWindow._build_vps_tab)
+    ts = inspect.getsource(main_window.MainWindow._build_tunnels_tab)
+    assert "vps_tree" in vs and "tun_tree" not in vs
+    assert "tun_tree" in ts and "vps_tree" not in ts
     from wsl_port.vendor.port_forwarder.web.server import DASHBOARD_HTML
-    assert "1. Servidores VPS" in DASHBOARD_HTML
-    assert "2. Tunnels SSH" in DASHBOARD_HTML
-    assert (DASHBOARD_HTML.index("1. Servidores VPS")
-            < DASHBOARD_HTML.index("2. Tunnels SSH"))
+    assert 'showTab:vps' in DASHBOARD_HTML and 'showTab:tunnels' in DASHBOARD_HTML
+    assert (DASHBOARD_HTML.index("showTab:vps")
+            < DASHBOARD_HTML.index("showTab:tunnels"))
+    assert (DASHBOARD_HTML.index('id="tab-vps"')
+            < DASHBOARD_HTML.index('id="tab-tunnels"'))
     assert DASHBOARD_HTML.index('id="vps-body"') < DASHBOARD_HTML.index('id="tun-body"')
 
 

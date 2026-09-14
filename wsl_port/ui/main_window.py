@@ -276,9 +276,14 @@ class MainWindow:
         self.publish_tab = PublishTab(nb)
         nb.add(self.publish_tab, text="  Publicar en Internet  ")
 
-        # -- VPS / Tunnels --------------------------------------------------------
+        # -- VPS (pestana propia: solo servidores) --------------------------------
+        v_tab = ttk.Frame(nb, padding=8)
+        nb.add(v_tab, text="  VPS  ")
+        self._build_vps_tab(v_tab)
+
+        # -- Tunnels (pestana propia: solo tuneles SSH) ---------------------------
         t_tab = ttk.Frame(nb, padding=8)
-        nb.add(t_tab, text="  VPS / Tunnels  ")
+        nb.add(t_tab, text="  Tunnels SSH  ")
         self._build_tunnels_tab(t_tab)
 
         # -- Forwards -------------------------------------------------------------
@@ -336,26 +341,24 @@ class MainWindow:
 
     # -- Tunnels tab ------------------------------------------------------------
 
-    def _build_tunnels_tab(self, parent) -> None:
-        # Secciones separadas: 1) VPS (el destino se define primero),
-        # 2) Tunnels (dependen de un VPS ya existente).
-        ttk.Label(parent, text="1. Servidores VPS", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
-        vps_bar = ttk.Frame(parent)
-        vps_bar.pack(fill="x", pady=(0, 8))
+    def _build_vps_tab(self, parent) -> None:
+        """Pestana exclusiva de servidores VPS (destino de los tuneles)."""
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(0, 8))
         for text, style, cmd in [
+            ("Refrescar", "success", self._refresh_full),
             ("Nuevo VPS...", "info", self._add_vps_dialog),
             ("Editar VPS...", "secondary outline", self._edit_vps_selected),
             ("Eliminar VPS", "danger outline", self._remove_vps_selected),
         ]:
-            ttk.Button(vps_bar, text=text, bootstyle=style, command=cmd).pack(side="left", padx=2)
+            ttk.Button(bar, text=text, bootstyle=style, command=cmd).pack(side="left", padx=2)
         self.vps_tree = _make_tree(parent, ["VPS", "Host", "Usuario", "Puerto", "Auth"],
                                    [150, 220, 130, 80, 120])
 
-        ttk.Separator(parent).pack(fill="x", pady=8)
-
-        ttk.Label(parent, text="2. Tunnels SSH (al VPS)", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
-        tun_bar = ttk.Frame(parent)
-        tun_bar.pack(fill="x", pady=(0, 8))
+    def _build_tunnels_tab(self, parent) -> None:
+        """Pestana exclusiva de tuneles SSH."""
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(0, 8))
         for text, style, cmd in [
             ("Refrescar", "success", self._refresh_full),
             ("Nuevo Tunnel...", "info", self._add_tunnel_dialog),
@@ -365,7 +368,7 @@ class MainWindow:
             ("Reiniciar", "info outline", self._restart_selected_tunnel),
             ("Eliminar", "danger outline", self._remove_selected_tunnel),
         ]:
-            ttk.Button(tun_bar, text=text, bootstyle=style, command=cmd).pack(side="left", padx=2)
+            ttk.Button(bar, text=text, bootstyle=style, command=cmd).pack(side="left", padx=2)
         self.tun_tree = _make_tree(parent, ["ID", "Tipo", "VPS", "Local", "Remoto", "Estado", "Trafico"],
                                    [150, 70, 130, 140, 170, 80, 200])
 

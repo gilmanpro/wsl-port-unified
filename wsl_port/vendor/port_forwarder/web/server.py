@@ -2062,7 +2062,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <button class="tab active" data-cmd="showTab:distros"> Distros WSL </button>
   <button class="tab" data-cmd="showTab:publicar"> Publicar en Internet </button>
   <button class="tab" data-cmd="showTab:terminal"> Terminal WSL </button>
-  <button class="tab" data-cmd="showTab:tunnels"> VPS / Tunnels </button>
+  <button class="tab" data-cmd="showTab:vps"> VPS </button>
+  <button class="tab" data-cmd="showTab:tunnels"> Tunnels SSH </button>
   <button class="tab" data-cmd="showTab:forwards"> Forwards </button>
   <button class="tab" data-cmd="showTab:logs"> Logs </button>
   <button class="tab" data-cmd="showTab:ajustes"> Ajustes </button>
@@ -2124,8 +2125,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     </div>
   </div>
 </div>
-<div id="tab-tunnels" class="tab-content">
-  <div id="activity"></div>
+<div id="tab-vps" class="tab-content">
   <div class="toolbar">
     <button class="success" data-cmd="refresh">Refrescar</button>
     <button data-cmd="toggleVpsForm">Nuevo VPS...</button>
@@ -2153,8 +2153,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div class="form"><button class="success" data-cmd="submitVpsEdit">Guardar</button><button class="outline" data-cmd="toggleVpsEditForm">Cancelar</button></div>
     </div>
   </div>
-  <div class="card"><h2>1. Servidores VPS</h2><table><thead><tr><th>VPS</th><th>Host</th><th>Usuario</th><th>Puerto</th></tr></thead><tbody id="vps-body"></tbody></table></div>
+  <div class="card"><h2>Servidores VPS</h2><table><thead><tr><th>VPS</th><th>Host</th><th>Usuario</th><th>Puerto</th></tr></thead><tbody id="vps-body"></tbody></table></div>
+</div>
+<div id="tab-tunnels" class="tab-content">
+  <div id="activity"></div>
   <div class="toolbar">
+    <button class="success" data-cmd="refresh">Refrescar</button>
     <button data-cmd="openTunForm">Nuevo Tunnel...</button>
     <button class="outline" data-cmd="openTunEdit">Editar...</button>
     <button class="warn outline" data-cmd="tunDiagSel">Diagnosticar</button>
@@ -2162,7 +2166,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <button class="warn" data-cmd="tunnelActionSel:stop">Detener</button>
     <button class="danger outline" data-cmd="deleteTunnelSel">Eliminar</button>
   </div>
-  <div class="card"><h2>2. Tunnels SSH (al VPS)</h2><table><thead><tr><th>ID</th><th>Tipo</th><th>VPS</th><th>Local</th><th>Remoto</th><th>Estado</th></tr></thead><tbody id="tun-body"></tbody></table></div>
+  <div class="card"><h2>Tunnels SSH (al VPS)</h2><table><thead><tr><th>ID</th><th>Tipo</th><th>VPS</th><th>Local</th><th>Remoto</th><th>Estado</th></tr></thead><tbody id="tun-body"></tbody></table></div>
 </div>
 <div id="tab-forwards" class="tab-content">
   <div id="activity"></div>
