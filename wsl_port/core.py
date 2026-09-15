@@ -745,6 +745,13 @@ def start_tunnel(tun_id: str) -> dict:
             provider.start(tun)
         # Remove from manually stopped set so supervisor can manage it again
         sup.tunnel_manually_stopped.discard(tun_id)
+        # Persistir estado: iniciar quita el stop manual (sobrevive al reinicio)
+        if getattr(tun, "manual_stop", False):
+            tun.manual_stop = False
+            try:
+                store.save()
+            except Exception:  # noqa: BLE001
+                log.warning("no se pudo persistir manual_stop=False en '%s'", tun_id)
         return {"ok": True, "message": f"Tunnel '{tun_id}' iniciado"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -763,6 +770,13 @@ def stop_tunnel(tun_id: str) -> dict:
             provider.stop(tun)
         # Mark as manually stopped so supervisor doesn't restart it
         sup.tunnel_manually_stopped.add(tun_id)
+        # Persistir estado: el stop manual sobrevive a reinicios de app/PC
+        if not getattr(tun, "manual_stop", False):
+            tun.manual_stop = True
+            try:
+                store.save()
+            except Exception:  # noqa: BLE001
+                log.warning("no se pudo persistir manual_stop=True en '%s'", tun_id)
         return {"ok": True, "message": f"Tunnel '{tun_id}' detenido"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -777,6 +791,12 @@ def restart_tunnel(tun_id: str) -> dict:
         # Use supervisor's SSH provider to restart the process
         sup = supervisor()
         provider = sup.ssh if tun.type == "ssh" else _provider_for(tun)
+        if getattr(tun, "manual_stop", False):
+            tun.manual_stop = False  # reiniciar = volver a estar activo
+            try:
+                store.save()
+            except Exception:  # noqa: BLE001
+                log.warning("no se pudo persistir manual_stop=False en '%s'", tun_id)
         if provider:
             provider.stop(tun)
             import time
@@ -856,6 +876,25 @@ def add_vps(vps_id: str, host: str, user: str, port: int = 22,
                   identity_file=identity_file, password=password)
         store.add_vps(vps)
         return {"ok": True, "message": f"VPS '{vps_id}' creado"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def update_vps(vps_id: str, host: str, user: str, port: int = 22,
+               identity_file: str = "", password: str = "") -> dict:
+    try:
+        store = pf_store()
+        vps = store.get_vps(vps_id)
+        if not vps:
+            return {"ok": False, "error": f"VPS '{vps_id}' no existe"}
+        vps.host = host
+        vps.user = user
+        vps.port = port
+        vps.identity_file = identity_file
+        if password:
+            vps.password = password
+        store.save()
+        return {"ok": True, "message": f"VPS '{vps_id}' actualizado"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

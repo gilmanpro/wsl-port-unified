@@ -1521,14 +1521,24 @@ class WebPanel:
                 if not tun:
                     return {"ok": False, "error": f"tunnel '{tun_id}' no existe"}
                 vps = store.get_vps(tun.vps_id)
+                def _set_manual_stop(val):
+                    if bool(getattr(tun, "manual_stop", False)) != val:
+                        tun.manual_stop = val
+                        try:
+                            store.save()
+                        except Exception:  # noqa: BLE001
+                            pass
                 if op == "start":
                     if not self.supervisor.ssh.is_alive(tun):
                         self.supervisor.ssh.start(tun, vps)
+                    _set_manual_stop(False)
                     return {"ok": True, "message": f"{tun_id} iniciado"}
                 if op == "stop":
                     self.supervisor.ssh.stop(tun)
+                    _set_manual_stop(True)
                     return {"ok": True, "message": f"{tun_id} detenido"}
                 if op == "restart":
+                    _set_manual_stop(False)
                     self.supervisor.ssh.restart(tun, vps)
                     return {"ok": True, "message": f"{tun_id} reiniciado"}
                 if op == "update":
@@ -1547,6 +1557,15 @@ class WebPanel:
                         changes["remote_binds"] = [self._parse_bind(r, "remote") for r in remotes]
                     if changes:
                         store.update_tunnel(tun_id, **changes)
+                        # Reactivar el tunnel implica quitar el stop manual
+                        if changes.get("enabled") is True or changes.get("auto_start") is True:
+                            t2 = store.get_tunnel(tun_id)
+                            if t2 is not None and getattr(t2, "manual_stop", False):
+                                t2.manual_stop = False
+                                try:
+                                    store.save()
+                                except Exception:  # noqa: BLE001
+                                    pass
                         self.metrics.record_event("web_tunnel_update", tunnel_id=tun_id)
                     return {"ok": True, "message": f"{tun_id} actualizado"}
                 if op == "edit":
@@ -1613,7 +1632,7 @@ class WebPanel:
                     host = str(body.get("host", vps.host)).strip()
                     user = str(body.get("user", vps.user)).strip()
                     port = int(body.get("port") or vps.port)
-                    identity_file = str(body.get("identity_file", "")).strip()
+                    identity_file = str(body.get("identity_file", vps.identity_file)).strip()
                     password = body.get("password", "")
                     vps.id = vps_id
                     vps.host = host
@@ -2001,6 +2020,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   button.outline:hover { background:var(--card2); }
   input, select { padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:12px; }
   input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(0,212,255,.15); }
+  .pw-wrap { position:relative; display:inline-flex; align-items:center; }
+  .pw-wrap > input { padding-right:32px; }
+  .dialog .pw-wrap { width:100%; }
+  .dialog .pw-wrap > input { flex:1; }
+  .pw-eye { position:absolute; right:4px; background:transparent !important; border:0; color:var(--muted); padding:2px; display:flex; align-items:center; cursor:pointer; width:auto; line-height:0; }
+  .pw-eye:hover { color:var(--accent); filter:none; transform:none; }
+  .pw-eye svg { width:16px; height:16px; }
   .form { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center; }
   .form label { color:var(--muted); font-size:12px; font-weight:500; }
   .toolbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
@@ -2139,7 +2165,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div class="form"><label style="width:120px">Host / IP:</label><input id="vps-host" placeholder="1.2.3.4" style="width:200px"></div>
       <div class="form"><label style="width:120px">Usuario SSH:</label><input id="vps-user" value="debian" style="width:150px"></div>
       <div class="form"><label style="width:120px">Puerto SSH:</label><input id="vps-port" type="number" value="22" style="width:80px"></div>
-      <div class="form"><label style="width:120px">Password:</label><input id="vps-pass" type="password" placeholder="(opcional)" style="width:200px"></div>
+      <div class="form"><label style="width:120px">Password:</label><span class="pw-wrap"><input id="vps-pass" type="password" placeholder="(opcional)" style="width:200px"></span></div>
       <div class="form"><button class="success" data-cmd="submitVpsForm">Registrar VPS</button><button class="outline" data-cmd="toggleVpsForm">Cancelar</button></div>
     </div>
   </div>
@@ -2149,7 +2175,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div class="form"><label style="width:120px">Host / IP:</label><input id="vps-ehost" style="width:200px"></div>
       <div class="form"><label style="width:120px">Usuario SSH:</label><input id="vps-euser" style="width:150px"></div>
       <div class="form"><label style="width:120px">Puerto SSH:</label><input id="vps-eport" type="number" style="width:80px"></div>
-      <div class="form"><label style="width:120px">Password:</label><input id="vps-epass" type="password" placeholder="(dejar vacio = no cambiar)" style="width:200px"></div>
+      <div class="form"><label style="width:120px">Password:</label><span class="pw-wrap"><input id="vps-epass" type="password" placeholder="(dejar vacio = no cambiar)" style="width:200px"></span></div>
       <div class="form"><button class="success" data-cmd="submitVpsEdit">Guardar</button><button class="outline" data-cmd="toggleVpsEditForm">Cancelar</button></div>
     </div>
   </div>
@@ -2282,6 +2308,23 @@ function bindCmdEvents(){
 }
 async function clearAllForwards(){ if(await showConfirm('Limpiar forwards','Limpiar TODOS los forwards?')) post('/api/v1/forwards/clear', 'Limpiando forwards...'); }
 function esc(v){ const d=document.createElement('div'); d.textContent=(v===null||v===undefined)?'':String(v); return d.innerHTML.replace(/"/g,'&quot;'); }
+const EYE_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+function decoratePw(root){
+  (root||document).querySelectorAll('.pw-wrap > input[type=password]').forEach(function(inp){
+    const w=inp.parentElement;
+    if(w.querySelector('.pw-eye')) return;
+    const b=document.createElement('button');
+    b.type='button'; b.className='pw-eye'; b.title='Mostrar'; b.innerHTML=EYE_SVG;
+    b.onclick=function(){
+      const show=inp.type==='password';
+      inp.type=show?'text':'password';
+      b.innerHTML=show?EYE_OFF_SVG:EYE_SVG;
+      b.title=show?'Ocultar':'Mostrar';
+    };
+    w.appendChild(b);
+  });
+}
 function showDialog(title, fields, onOk){
   const overlay = document.createElement('div');
   overlay.className = 'dialog-overlay';
@@ -2293,7 +2336,7 @@ function showDialog(title, fields, onOk){
       for(const o of (f.options||[])) html += '<option value="' + esc(o.value) + '">' + esc(o.text) + '</option>';
       html += '</select>';
     } else if(f.type === 'password'){
-      html += '<input id="dlg-' + f.id + '" type="password" value="' + esc(f.value||'') + '">';
+      html += '<span class="pw-wrap"><input id="dlg-' + f.id + '" type="password" value="' + esc(f.value||'') + '"></span>';
     } else if(f.type === 'number'){
       html += '<input id="dlg-' + f.id + '" type="number" value="' + esc(f.value||'0') + '" min="1">';
     } else {
@@ -2304,6 +2347,7 @@ function showDialog(title, fields, onOk){
   html += '<div class="btns"><button class="outline" id="dlg-cancel">Cancelar</button><button class="success" id="dlg-ok">Aceptar</button></div></div>';
   overlay.innerHTML = html;
   document.body.appendChild(overlay);
+  decoratePw(overlay);
   overlay.querySelector('#dlg-cancel').onclick = ()=> overlay.remove();
   overlay.querySelector('#dlg-ok').onclick = ()=>{
     const vals = {};
@@ -2867,6 +2911,7 @@ function copyMcptoken() {
   });
 }
 
+decoratePw(document);
 setTimeout(connectWS, 400);
 setTimeout(()=>{ if(!WS || WS.readyState!==1){ refresh(); refreshEvents(); }}, 3000);
 setInterval(()=>{ if(!WS || WS.readyState!==1) refresh(); }, 15000);
@@ -2893,6 +2938,11 @@ LOGIN_HTML = r"""<!DOCTYPE html>
   .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
   input { width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:14px; margin-bottom:14px; box-sizing:border-box; }
   input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,212,255,.15); }
+  .pw-wrap { position:relative; display:block; margin-bottom:14px; }
+  .pw-wrap > input { padding-right:42px; margin-bottom:0; }
+  .pw-eye { position:absolute; right:4px; top:50%; transform:translateY(-50%); width:auto !important; background:transparent !important; border:0; color:var(--muted); padding:6px; display:flex; align-items:center; line-height:0; }
+  .pw-eye:hover { color:var(--accent); filter:none; transform:translateY(-50%); }
+  .pw-eye svg { width:18px; height:18px; }
   button { width:100%; background:#2563eb; border:0; color:#fff; padding:10px 12px; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500; transition:all .15s; }
   button:hover { filter:brightness(1.2); transform:translateY(-1px); }
   button:disabled { opacity:.5; cursor:not-allowed; transform:none; }
@@ -2907,7 +2957,7 @@ LOGIN_HTML = r"""<!DOCTYPE html>
   <div class="logo">🌐</div>
   <h1>wsl-port</h1>
   <div class="sub">Panel web — introduce el token de acceso</div>
-  <input id="token" type="password" placeholder="Token" autocomplete="current-password">
+  <span class="pw-wrap"><input id="token" type="password" placeholder="Token" autocomplete="current-password"><button type="button" class="pw-eye" id="eye" title="Mostrar"></button></span>
   <button id="btn">Entrar</button>
   <div id="msg"></div>
 </div>
@@ -2917,6 +2967,19 @@ function setMsg(text, cls){
   el.textContent=text;
   el.className=cls||'';
 }
+const EYE_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+(function(){
+  const inp=document.getElementById('token'), eye=document.getElementById('eye');
+  eye.innerHTML=EYE_SVG;
+  eye.onclick=function(){
+    const show=inp.type==='password';
+    inp.type=show?'text':'password';
+    eye.innerHTML=show?EYE_OFF_SVG:EYE_SVG;
+    eye.title=show?'Ocultar':'Mostrar';
+    inp.focus();
+  };
+})();
 async function doLogin(){
   const token=document.getElementById('token').value.trim();
   if(!token){ setMsg('Introduce el token','err'); return; }

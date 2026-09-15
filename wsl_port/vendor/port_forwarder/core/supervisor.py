@@ -500,6 +500,20 @@ class Supervisor:
                 self.tunnel_reason[t.id] = "tunnel deshabilitado"
                 summary["tunnels"][t.id] = {"state": STATE_STOPPED}
                 continue
+            if getattr(t, "manual_stop", False):
+                # Detenido a mano por el usuario: NO revivirlo (sistema tras
+                # reinicio de app/PC). Se reactiva con Iniciar/Reiniciar.
+                provider = self._provider_for(t)
+                if provider is not None:
+                    try:
+                        if provider.is_alive(t):
+                            provider.stop(t)
+                    except Exception:  # noqa: BLE001
+                        pass
+                self.tunnel_state[t.id] = STATE_STOPPED
+                self.tunnel_reason[t.id] = "detenido por usuario"
+                summary["tunnels"][t.id] = {"state": STATE_STOPPED}
+                continue
             provider = self._provider_for(t)
             if provider is None:
                 self.tunnel_state[t.id] = STATE_DOWN

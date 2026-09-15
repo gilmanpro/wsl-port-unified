@@ -49,6 +49,11 @@ INDEX_HTML = """<!doctype html>
   #login { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #10141aee; }
   #login form { background: #1d2430; border: 1px solid #2a3344; padding: 24px; border-radius: 12px; text-align: center; }
   #login input { padding: 8px 10px; border-radius: 6px; border: 1px solid #39445c; background: #14181f; color: #e8eaf0; margin: 8px 0; width: 220px; }
+  #login .pw-wrap { position: relative; display: inline-block; }
+  #login .pw-wrap > input { padding-right: 36px; }
+  #login .pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: transparent; border: 0; padding: 2px; color: #8b93a3; display: flex; align-items:center; line-height:0; }
+  #login .pw-eye:hover { color: #e8eaf0; background: transparent; }
+  #login .pw-eye svg { width: 16px; height: 16px; }
 </style>
 </head>
 <body>
@@ -58,7 +63,7 @@ INDEX_HTML = """<!doctype html>
 <div id="login" style="display:none">
   <form onsubmit="submitLogin(event)">
     <div style="font-size:15px;margin-bottom:6px">Clave del panel web</div>
-    <input type="password" id="pw" autocomplete="current-password" autofocus>
+    <span class="pw-wrap"><input type="password" id="pw" autocomplete="current-password" autofocus><button type="button" class="pw-eye" id="pw-eye" title="Mostrar"></button></span>
     <div><button type="submit" class="ok">Entrar</button></div>
   </form>
 </div>
@@ -73,6 +78,19 @@ INDEX_HTML = """<!doctype html>
 
 <script>
 const $ = (s) => document.querySelector(s);
+const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+(function () {
+  const inp = document.getElementById('pw'), eye = document.getElementById('pw-eye');
+  eye.innerHTML = EYE_SVG;
+  eye.onclick = function () {
+    const show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    eye.innerHTML = show ? EYE_OFF_SVG : EYE_SVG;
+    eye.title = show ? 'Ocultar' : 'Mostrar';
+    inp.focus();
+  };
+})();
 let TOKEN = localStorage.getItem('wslm_token') || '';
 function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 function askLogin() { $('#login').style.display = 'flex'; setTimeout(() => $('#pw').focus(), 50); }

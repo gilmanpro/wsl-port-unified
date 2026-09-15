@@ -95,6 +95,9 @@ class Tunnel:
     keepalive_interval: int = 30
     keepalive_count: int = 3
     auto_start: bool = True
+    # Persistencia de estado: "Detener" manual sobrevive a reinicios de la app
+    # (el supervisor no revive un tunnel con manual_stop hasta que se Inicia).
+    manual_stop: bool = False
     health_gate: TunnelHealthGate = field(default_factory=TunnelHealthGate)
     jump: str | None = None  # multi-hop T10 (P2)
     local_url: str = ""  # tailscale/cloudflare: URL del servicio local
@@ -185,6 +188,7 @@ class Mcp:
 class OnClose:
     keep_tunnels_alive: bool = True
     clear_forwards: bool = False
+    stop_distros: bool = False
 
 
 @dataclass

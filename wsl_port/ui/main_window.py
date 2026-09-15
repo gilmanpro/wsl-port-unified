@@ -68,6 +68,39 @@ def _set_autostart(active: bool) -> None:
         pass
 
 
+def _get_autostart() -> bool:
+    """Lee si wsl-port esta registrado en el arranque de Windows."""
+    try:
+        from winreg import HKEY_CURRENT_USER, OpenKey, QueryValueEx
+        with OpenKey(HKEY_CURRENT_USER, _RUN_KEY) as k:
+            return bool(QueryValueEx(k, _AUTOSTART_NAME)[0])
+    except OSError:
+        return False
+
+
+_EYE_OPEN = "\U0001F441"    # 👁 ojo abierto (oculto -> clic para ver)
+_EYE_SHUT = "\U0001F441\u200D\U0001F5E8"  # 👁‍🗨 ojo "cerrado" (visible -> clic para ocultar)
+
+
+def _add_eye_toggle(parent, entry, row=None, col=None, sticky="w", padx=(4, 0), pady=0,
+                    side=None):
+    """Añade un botón de ojo (abrir/cerrar) junto a un Entry de contraseña."""
+    state = {"shown": False}
+
+    def toggle():
+        state["shown"] = not state["shown"]
+        entry.configure(show="" if state["shown"] else "*")
+        btn.configure(text=_EYE_SHUT if state["shown"] else _EYE_OPEN)
+
+    btn = ttk.Button(parent, text=_EYE_OPEN, width=3, bootstyle="outline",
+                     command=toggle)
+    if row is not None:
+        btn.grid(row=row, column=col, sticky=sticky, padx=padx, pady=pady)
+    else:
+        btn.pack(side=side or "left", padx=padx)
+    return btn
+
+
 def _fmt_bytes(n) -> str:
     n = float(n or 0)
     for u in ("B", "KB", "MB", "GB", "TB"):
@@ -117,8 +150,12 @@ class _FormDialog(tk.Toplevel):
                     row=i, column=1, sticky="ew", padx=(12, 0), pady=6)
             elif kind == "password":
                 var = tk.StringVar()
-                ttk.Entry(frame, textvariable=var, width=30, show="*", font=(_FONT, 10)).grid(
-                    row=i, column=1, sticky="ew", padx=(12, 0), pady=6)
+                pw_frame = ttk.Frame(frame)
+                pw_frame.grid(row=i, column=1, sticky="ew", padx=(12, 0), pady=6)
+                entry = ttk.Entry(pw_frame, textvariable=var, width=27, show="*",
+                                  font=(_FONT, 10))
+                entry.pack(side="left", fill="x", expand=True)
+                _add_eye_toggle(pw_frame, entry, side="left")
             elif kind == "int":
                 var = tk.IntVar(value=0)
                 ttk.Entry(frame, textvariable=var, width=10, font=(_FONT, 10)).grid(
@@ -198,10 +235,45 @@ class MainWindow:
         self._q: queue.Queue = queue.Queue()
         self._build()
         self._refresh()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(200, self._poll)
         self.root.after(15000, self._schedule_refresh)
         self.root.lift()
         self.root.focus_force()
+
+    def _on_close(self) -> None:
+        """Aplica los ajustes 'Al salir' antes de cerrar la ventana."""
+        try:
+            stop_d = bool(self.stop_distros_var.get())
+            keep_t = bool(self.keep_tunnels_var.get())
+        except Exception:  # noqa: BLE001
+            stop_d, keep_t = False, True
+        if not stop_d and keep_t:
+            self.root.destroy()
+            return
+        try:
+            self.root.configure(cursor="watch")
+        except Exception:  # noqa: BLE001
+            pass
+
+        def _work():
+            if not keep_t:
+                try:
+                    for t in core.tunnels():
+                        if t.get("state") == "running":
+                            core.stop_tunnel(t["id"])
+                except Exception:  # noqa: BLE001
+                    pass
+            if stop_d:
+                try:
+                    core.shutdown_all()
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                self.root.after(0, self.root.destroy)
+            except Exception:  # noqa: BLE001
+                pass
+        threading.Thread(target=_work, daemon=True).start()
 
     def _notify(self, title: str, message: str, level: str = "info") -> None:
         """Notificacion de actividad: banner en-app (siempre visible) + toast Windows.
@@ -508,7 +580,14 @@ class MainWindow:
         r = _row(card_web, r, "Bind:", lambda p: ttk.Entry(p, textvariable=self.web_bind_var, width=14))
         self.web_pw_var = tk.StringVar()
         _r_web_pw = r
-        r = _row(card_web, r, "Clave:", lambda p: ttk.Entry(p, textvariable=self.web_pw_var, width=20, show="*"),
+
+        def _web_pw_field(p):
+            f = ttk.Frame(p)
+            e = ttk.Entry(f, textvariable=self.web_pw_var, width=17, show="*")
+            e.pack(side="left")
+            _add_eye_toggle(f, e, side="left")
+            return f
+        r = _row(card_web, r, "Clave:", _web_pw_field,
                  "Obligatoria. Se guarda cifrada (DPAPI).")
         ttk.Button(card_web, text="Generar clave fuerte", bootstyle="info-outline",
                    command=self._generate_web_key
@@ -550,7 +629,14 @@ class MainWindow:
                         bootstyle="round-toggle").grid(row=r, column=0, columnspan=2, sticky="w", pady=4)
         r += 1
         self.mcp_key_var = tk.StringVar()
-        r = _row(card_mcp, r, "Token:", lambda p: ttk.Entry(p, textvariable=self.mcp_key_var, width=20, show="*"),
+
+        def _mcp_key_field(p):
+            f = ttk.Frame(p)
+            e = ttk.Entry(f, textvariable=self.mcp_key_var, width=17, show="*")
+            e.pack(side="left")
+            _add_eye_toggle(f, e, side="left")
+            return f
+        r = _row(card_mcp, r, "Token:", _mcp_key_field,
                  "Se conserva el actual si lo dejas vacio.")
         self.mcp_exec_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(card_mcp, text="Exponer wsl_exec (RCE en distros)",
@@ -623,6 +709,8 @@ class MainWindow:
             self.theme_var.set(cfg.ui.theme if cfg.ui.theme != "dark" else "superhero")
             self.tray_var.set(cfg.ui.close_to_tray)
             self.keep_tunnels_var.set(cfg.on_close.keep_tunnels_alive)
+            self.stop_distros_var.set(bool(getattr(cfg.on_close, "stop_distros", False)))
+            self.auto_start_var.set(_get_autostart())
             self.sup_interval_var.set(str(cfg.ui.supervisor_interval_seconds))
             self.metrics_retention_var.set(str(cfg.ui.metrics_retention_days))
             self.web_enabled_var.set(cfg.ui.web_panel_enabled)
@@ -786,8 +874,11 @@ class MainWindow:
                         "bind 127.0.0.1 y acceso por tunel SSH.")
                     return
             if web_pw:
-                from wsl_port.vendor.port_forwarder.utils.secrets import SecretsStore
-                SecretsStore().set("web_panel_token", web_pw)
+                # Actualizar TAMBIEN el valor en memoria: si no, el stash de
+                # store.save() reescribe el vault con el token viejo y al
+                # reiniciar la clave anterior vuelve a estar activa.
+                # Vacio = conservar la actual (el stash re-firma la misma).
+                cfg.ui.web_panel_token = web_pw
             cfg.api.enabled = self.api_enabled_var.get()
             cfg.api.port = int(self.api_port_var.get() or 8781)
             mcp_on = self.mcp_enabled_var.get()
@@ -1295,9 +1386,8 @@ class MainWindow:
             return
         data = dlg.result
         self._notify("VPS", f"Actualizando VPS '{vps_id}'...")
-        core.remove_vps(vps_id)
-        r = core.add_vps(
-            vps_id=vps_id, host=data["host"].strip(),
+        r = core.update_vps(
+            vps_id, host=data["host"].strip(),
             user=data.get("user", "").strip(), port=int(data.get("port", 22) or 22),
             identity_file=data.get("identity_file", "").strip(),
             password=data.get("password", "").strip())

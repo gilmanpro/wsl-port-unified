@@ -246,6 +246,74 @@ def test_vps_roundtrip(mock_wsl, isolated_config):
     assert r["ok"] is True
 
 
+def test_update_vps_persiste_tras_reload(mock_wsl, isolated_config):
+    from wsl_port.vendor.port_forwarder.core.config import ConfigStore
+    assert core.add_vps("vup", "h1", "u1", 22,
+                        identity_file="C:/k/id", password="pass1")["ok"]
+    # vacio en password = conservar la actual (no borrar del vault)
+    r = core.update_vps("vup", "h2", "u2", 2022, identity_file="C:/k/id2", password="")
+    assert r["ok"], r
+    store2 = ConfigStore(path=str(isolated_config.path))
+    v = next((v for v in store2.cfg.vps_list if v.id == "vup"), None)
+    assert v is not None
+    assert v.host == "h2" and v.user == "u2" and v.port == 2022
+    assert v.identity_file == "C:/k/id2"
+    assert v.password == "pass1"
+
+
+def test_tunnel_manual_stop_persiste_y_no_revive(mock_wsl, isolated_config):
+    from wsl_port.vendor.port_forwarder.core.config import (
+        ConfigStore, Tunnel, Bind, Vps)
+    from wsl_port.vendor.port_forwarder.core.supervisor import Supervisor
+    isolated_config.cfg.vps_list.append(Vps(id="vpx", host="h", user="u"))
+    isolated_config.cfg.tunnels.append(Tunnel(
+        id="tst", vps_id="vpx", enabled=True, auto_start=True, manual_stop=True,
+        local_bind=Bind(host="127.0.0.1", port=9001),
+        remote_binds=[Bind(host="0.0.0.0", port=18099)]))
+    isolated_config.save()
+    # sobrevive al reload (reinicio de app/PC)
+    store2 = ConfigStore(path=str(isolated_config.path))
+    assert store2.get_tunnel("tst").manual_stop is True
+    # el supervisor NO intenta revivirlo
+    sup = Supervisor(store2)
+
+    class FakeProv:
+        starts = 0
+        def is_alive(self, tt): return False
+        def stop(self, tt): pass
+        def start(self, *a, **k): FakeProv.starts += 1
+        def failure_reason(self, tt): return None
+    fake = FakeProv()
+    sup._provider_for = lambda tt: fake
+    sup.run_once()
+    assert FakeProv.starts == 0
+    assert sup.tunnel_state["tst"] == "stopped"
+
+
+def test_core_stop_tunnel_persista_manual_stop(mock_wsl, isolated_config):
+    from wsl_port.vendor.port_forwarder.core.config import ConfigStore, Tunnel, Bind, Vps
+    isolated_config.cfg.vps_list.append(Vps(id="vps-ms", host="h", user="u"))
+    isolated_config.cfg.tunnels.append(Tunnel(
+        id="tms", vps_id="vps-ms", enabled=True, auto_start=True,
+        local_bind=Bind(host="127.0.0.1", port=9002),
+        remote_binds=[Bind(host="0.0.0.0", port=18098)]))
+    isolated_config.save()
+    r = core.stop_tunnel("tms")
+    assert r["ok"], r
+    store2 = ConfigStore(path=str(isolated_config.path))
+    assert store2.get_tunnel("tms").manual_stop is True
+
+
+def test_on_close_flags_persisten(mock_wsl, isolated_config):
+    from wsl_port.vendor.port_forwarder.core.config import ConfigStore
+    isolated_config.cfg.on_close.stop_distros = True
+    isolated_config.cfg.on_close.keep_tunnels_alive = False
+    isolated_config.save()
+    store2 = ConfigStore(path=str(isolated_config.path))
+    assert store2.cfg.on_close.stop_distros is True
+    assert store2.cfg.on_close.keep_tunnels_alive is False
+
+
 def test_start_stop_tunnel_error_sin_vps(empty_state, mock_wsl):
     # No tunnels -> error controlado
     r = core.start_tunnel("noexiste")

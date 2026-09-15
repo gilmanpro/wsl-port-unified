@@ -189,6 +189,27 @@ def test_panel_y_mcp_tokens_migran_al_vault(tmp_path):
     assert store2.cfg.mcp.token == "mcp-claro-1234567890"
 
 
+def test_web_panel_token_actualizado_no_lo_pisa_el_viejo(tmp_path):
+    """Regresion: guardar una clave nueva desde Ajustes debe persistir.
+
+    El bug: SecretsStore.set(new) y luego store.save() re-stasheaba el token
+    VIEJO que seguia en memoria (cfg.ui.web_panel_token), sobrescribiendo el
+    vault; al reiniciar volvía la clave anterior. La GUI ahora actualiza
+    tambien cfg.ui.web_panel_token ANTES de store.save().
+    """
+    store = ConfigStore(path=str(tmp_path / "config.json"))
+    store.cfg.ui.web_panel_token = "juandiaz"      # clave vieja hidratada
+    store.save()
+    nueva = "CLAVE-NUEVA-0123456789abcdef"
+    # flujo corregido de _save_settings:
+    store.cfg.ui.web_panel_token = nueva           # memoria al dia
+    store.save()                                   # el stash cifra 'nueva'
+    raw = store.path.read_text(encoding="utf-8")
+    assert "CLAVE-NUEVA" not in raw and "juandiaz" not in raw
+    store2 = ConfigStore(path=str(tmp_path / "config.json"))
+    assert store2.cfg.ui.web_panel_token == nueva  # reload tras reiniciar
+
+
 def test_export_redactado_e_import(tmp_path):
     store = ConfigStore(path=str(tmp_path / "config.json"))
     store.cfg.vps_list.append(Vps(id="v9", password="CLAVE-VIVA"))
