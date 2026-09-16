@@ -105,8 +105,8 @@ def fake_provider(monkeypatch):
             self.calls.append("get_all_ips")
             return {"Debian": "172.26.1.1"}
 
-        def install_new(self, name, no_launch=True):
-            self.calls.append(("install", name))
+        def install_new(self, name, no_launch=True, custom_name=""):
+            self.calls.append(("install", name, custom_name))
             return FakeCmdResult()
 
         def metrics(self, name):
@@ -173,11 +173,35 @@ def test_get_all_ips(fake_provider, mock_wsl):
     assert ips.get("Debian") == "172.26.1.1"
 
 
+def test_install_new_construye_name(monkeypatch):
+    from wsl_port.vendor.wsl_manager.providers import wsl_provider as wp
+
+    captured = {}
+
+    def fake_run(cmd, timeout=30, breaker=True):
+        captured["cmd"] = cmd
+        return FakeCmdResult()
+    monkeypatch.setattr(wp, "run", fake_run)
+    prov = wp.WslProvider()
+    prov.install_new("kali-linux", no_launch=True, custom_name="Kali-Work")
+    assert captured["cmd"] == [
+        "wsl.exe", "--install", "--distribution", "kali-linux",
+        "--no-launch", "--name", "Kali-Work"]
+    captured.clear()
+    prov.install_new("Ubuntu")
+    assert captured["cmd"] == [
+        "wsl.exe", "--install", "--distribution", "Ubuntu", "--no-launch"]
+
+
 def test_create_delete_export_import(fake_provider, mock_wsl, isolated_config,
                                       monkeypatch, tmp_path):
     r = core.create_distro("Ubuntu")
     assert r["ok"] is True
-    assert ("install", "Ubuntu") in fake_provider.calls
+    assert ("install", "Ubuntu", "") in fake_provider.calls
+
+    r = core.create_distro("kali-linux", custom_name="Kali-Work")
+    assert r["ok"] is True
+    assert ("install", "kali-linux", "Kali-Work") in fake_provider.calls
 
     monkeypatch.setattr("wsl_port.vendor.wsl_manager.utils.subprocess_async.run",
                         lambda *a, **k: FakeCmdResult())
@@ -302,6 +326,104 @@ def test_core_stop_tunnel_persista_manual_stop(mock_wsl, isolated_config):
     assert r["ok"], r
     store2 = ConfigStore(path=str(isolated_config.path))
     assert store2.get_tunnel("tms").manual_stop is True
+
+
+def test_wsl_port_owner_detecta_colision_entre_distros(monkeypatch, mock_wsl,
+                                                        isolated_config):
+    """WSL2: todas las distros comparten red; un puerto lo posee UNA distro.
+
+    El guard se basa en que `ss -ltnp` solo muestra 'users:(' en la distro
+    duena del socket (namespace de PID propio).
+    """
+    from wsl_port.vendor.wsl_manager.utils import subprocess_async as sasync
+    ss_kali = (
+        "State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n"
+        "LISTEN 0      128          0.0.0.0:2222      0.0.0.0:*    "
+        "users:((\"sshd\",pid=1048,fd=6))\n"
+    )
+    ss_empty = ("State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\n")
+
+    def fake_run(cmd, timeout=30, breaker=True, **kw):
+        name = cmd[cmd.index("-d") + 1]
+        return FakeCmdResult(ok=True, output=ss_kali if name == "kali" else ss_empty)
+    monkeypatch.setattr(sasync, "run", fake_run)
+    monkeypatch.setattr(core, "distros", lambda skip_ips=False: [
+        {"name": "kali", "running": True}, {"name": "alandete-1", "running": True}])
+
+    assert core.wsl_port_owner(2222)["owner"] == "kali"
+    assert core.wsl_port_owner(2223)["owner"] is None
+    # forward apuntando a otra distro sobre el puerto ocupado: BLOQUEADO
+    r = core.add_forward("f-col", 8080, "alandete-1", 2222)
+    assert r["ok"] is False and "kali" in r["error"]
+    # el dueno legitimo si puede
+    r = core.add_forward("f-ok", 8081, "kali", 2222)
+    assert r["ok"], r
+    # distro desconocida: sin base para comparar → no bloquea
+    r = core.add_forward("f-x", 8082, "otra", 2222)
+    assert r["ok"], r
+
+
+def test_gate_caido_no_relanza_ssh_vivo(tmp_path):
+    """Flapping: cliente vivo + gate transitorio NO debe relanzar el tunel."""
+    import socket as _sock
+    from wsl_port.vendor.port_forwarder.core.config import (
+        Tunnel, Bind, TunnelHealthGate)
+    from wsl_port.vendor.port_forwarder.providers.ssh_tunnel_provider import (
+        SshTunnelProvider)
+    prov = SshTunnelProvider(pid_dir=str(tmp_path / "p"),
+                             log_dir=str(tmp_path / "l"))
+    t = Tunnel(id="g1", local_bind=Bind(host="127.0.0.1", port=59998),
+               remote_binds=[Bind(host="0.0.0.0", port=59999)],
+               health_gate=TunnelHealthGate(enabled=True))
+
+    class FakeP:
+        def poll(self):
+            return None
+    prov._procs["g1"] = FakeP()
+    assert prov.is_process_alive(t) is True
+    assert prov.is_alive(t) is False          # gate caido (nada en 59998)
+    srv = _sock.socket()
+    srv.bind(("127.0.0.1", 59998))
+    srv.listen(8)
+    try:
+        assert prov.is_alive(t) is True       # servicio vuelve -> vivo
+    finally:
+        srv.close()
+
+
+def test_pid_alive_windows_no_falso_muerto():
+    """Regresion flapping: os.kill(pid,0) lanza WinError 87 en Windows para
+    procesos vivos y el supervisor los creia muertos (relanzamiento en bucle).
+    _pid_alive debe usar OpenProcess/GetExitCodeProcess."""
+    import os
+    from wsl_port.vendor.port_forwarder.providers.ssh_tunnel_provider import (
+        SshTunnelProvider)
+    p = SshTunnelProvider()
+    assert p._pid_alive(os.getpid()) is True
+    assert p._pid_alive(999_999) is False
+
+
+def test_supervisor_no_relanza_con_proceso_vivo(mock_wsl, isolated_config):
+    from wsl_port.vendor.port_forwarder.core.config import Tunnel, Bind, Vps
+    from wsl_port.vendor.port_forwarder.core.supervisor import Supervisor
+    isolated_config.cfg.vps_list.append(Vps(id="vx", host="h", user="u"))
+    isolated_config.cfg.tunnels.append(Tunnel(
+        id="flap", vps_id="vx", enabled=True, auto_start=True,
+        local_bind=Bind(host="127.0.0.1", port=9100),
+        remote_binds=[Bind(host="0.0.0.0", port=9101)]))
+    sup = Supervisor(isolated_config)
+
+    class P:
+        starts = 0
+        def is_alive(self, t): return False
+        def is_process_alive(self, t): return True
+        def stop(self, t): pass
+        def start(self, *a, **k): P.starts += 1
+        def failure_reason(self, t): return None
+    sup._provider_for = lambda t: P()
+    sup.run_once()
+    assert P.starts == 0
+    assert sup.tunnel_state["flap"] == "waiting"
 
 
 def test_on_close_flags_persisten(mock_wsl, isolated_config):

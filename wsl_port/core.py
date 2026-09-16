@@ -356,12 +356,18 @@ def get_all_ips() -> dict[str, str | None]:
         return {}
 
 
-def create_distro(name: str, no_launch: bool = True) -> dict:
-    """Crear una nueva distro WSL desde el catalogo (wsl --install)."""
+def create_distro(name: str, no_launch: bool = True,
+                  custom_name: str = "") -> dict:
+    """Crear una nueva distro WSL desde el catalogo (wsl --install).
+
+    custom_name: nombre con el que se registra (--name); permite instalar el
+    mismo SO varias veces sin conflicto.
+    """
     if not wsl_health_check():
         return {"ok": False, "error": "WSL no responde - reinicia el PC"}
     try:
-        r = wsl_provider().install_new(name, no_launch=no_launch)
+        r = wsl_provider().install_new(name, no_launch=no_launch,
+                                       custom_name=custom_name)
         return {"ok": r.ok, "output": r.output, "error": r.error}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -560,12 +566,83 @@ def forwards() -> list[dict]:
         return []
 
 
+def wsl_port_owner(port: int, names: list[str] | None = None) -> dict:
+    """Identifica QUE distro WSL escucha `port`.
+
+    En WSL2 (NAT) todas las distros comparten UN solo namespace de red
+    (misma IP): un puerto TCP solo puede estar escuchando en una distro.
+    El truco: `ss -ltnp` dentro de cada distro solo muestra el proceso dueno
+    del socket si este vive en su propio namespace de PID; por tanto, la
+    distro cuya salida incluye "users:(" para ese puerto es la duena.
+
+    Devuelve {"ok", "port", "owner": str|None, "listening": bool,
+              "unknown": [distros a las que no se pudo sondear]}.
+    """
+    from wsl_port.vendor.wsl_manager.utils.subprocess_async import run
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "puerto invalido", "port": port,
+                "owner": None, "listening": False, "unknown": []}
+    if names is None:
+        names = [d.get("name", "") for d in distros(skip_ips=True)
+                 if d.get("running")
+                 and not str(d.get("name", "")).lower().startswith("docker-desktop")]
+    unknown: list[str] = []
+    for name in names:
+        if not name:
+            continue
+        try:
+            r = run(["wsl.exe", "-d", name, "-u", "root", "ss", "-ltnp"],
+                    timeout=8, breaker=False)
+        except Exception:  # noqa: BLE001
+            unknown.append(name)
+            continue
+        out = (r.output or "") if r else ""
+        if not out.strip():
+            unknown.append(name)  # sin ss / sin permisos: no se pudo determinar
+            continue
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 4 or parts[0] != "LISTEN":
+                continue
+            if parts[3].endswith(f":{port}") and "users:(" in line:
+                return {"ok": True, "port": port, "owner": name,
+                        "listening": True, "unknown": unknown}
+    return {"ok": True, "port": port, "owner": None,
+            "listening": False, "unknown": unknown}
+
+
+def _wsl_port_conflict(wsl_port: int, distro: str) -> str | None:
+    """Mensaje de error si `wsl_port` lo escucha OTRA distro; None si hay via libre."""
+    if not distro:
+        return None
+    try:
+        known = {str(d.get("name", "")).lower() for d in distros(skip_ips=True)}
+        if distro.lower() not in known:
+            return None  # distro desconocida: no hay base para comparar
+        info = wsl_port_owner(int(wsl_port))
+    except Exception:  # noqa: BLE001 - el sondeo nunca debe romper la accion
+        return None
+    owner = info.get("owner")
+    if owner and owner.lower() != str(distro).lower():
+        return (f"Conflicto de puerto: el puerto WSL {wsl_port} lo esta "
+                f"usando la distro '{owner}'. En WSL2 todas las distros "
+                "comparten la misma red y un puerto solo puede escuchar en "
+                "una. Mueve el servicio de alguna de las dos a otro puerto "
+                "(ej: 2222 -> 2223).")
+    return None
+
+
 def add_forward(fwd_id: str, listen_port: int, wsl_distro: str, wsl_port: int,
                 protocol: str = "tcp", auto_apply: bool = True,
                 listen_address: str = "0.0.0.0") -> dict:
     try:
         from wsl_port.vendor.port_forwarder.core.config import Forward, HealthCheck
         store = pf_store()
+        conflict = _wsl_port_conflict(wsl_port, wsl_distro)
+        if conflict:
+            return {"ok": False, "error": conflict}
         fwd = Forward(
             id=fwd_id, listen_port=listen_port, listen_address=listen_address,
             wsl_distro=wsl_distro, wsl_port=wsl_port, protocol=protocol,
@@ -1432,6 +1509,12 @@ def publish(distro: str, wsl_port: int, vps_id: str, public_port: int,
         raise ValueError(f"VPS '{vps_id}' no registrado")
     if not check_local(int(wsl_port)):
         raise ValueError(f"no hay servicio en 127.0.0.1:{wsl_port}")
+    # WSL2 comparte red entre distros: 127.0.0.1:{wsl_port} llega a la distro
+    # que escuche ese puerto, NO necesariamente a la elegida. Evita publicar
+    # por error el servicio de otra distro.
+    conflict = _wsl_port_conflict(int(wsl_port), distro)
+    if conflict:
+        raise ValueError(conflict)
 
     tid = tunnel_id_for(distro, wsl_port)
     existing = [t for t in tunnels() if t.get("id") == tid]

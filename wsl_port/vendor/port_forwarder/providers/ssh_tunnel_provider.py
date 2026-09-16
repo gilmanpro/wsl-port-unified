@@ -22,6 +22,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -275,30 +276,58 @@ class SshTunnelProvider:
 
     # -- estado ---------------------------------------------------------------
 
-    def is_alive(self, tunnel: Tunnel) -> bool:
-        """Proceso vivo (+ health gate del servicio local, T5)."""
+    def is_process_alive(self, tunnel: Tunnel) -> bool:
+        """Solo el proceso ssh (sin health gate). Evita que el supervisor
+        relance un tunnel cuyo cliente esta vivo pero cuyo servicio local
+        tarda en responder (esa carrera creaba ssh duplicados peleandose
+        por el puerto remoto: flapping running/down)."""
         proc = self._procs.get(tunnel.id)
         if proc is not None:
             if proc.poll() is None:
-                return self._gate_ok(tunnel)
+                return True
             self._procs.pop(tunnel.id, None)
-            return False
         pid = self._read_pid(tunnel.id)
         if pid is not None and self._pid_alive(pid):
-            return self._gate_ok(tunnel)
-        # Fallback: el tunnel puede haberlo lanzado otra instancia/supervisor
-        # (el pidfile no coincide); comprobar proceso ssh vivo por patron.
-        if self._matching_ssh_pids(tunnel):
-            return self._gate_ok(tunnel)
-        return False
+            return True
+        return bool(self._matching_ssh_pids(tunnel))
+
+    def is_alive(self, tunnel: Tunnel) -> bool:
+        """Proceso vivo (+ health gate del servicio local, T5)."""
+        if not self.is_process_alive(tunnel):
+            return False
+        return self._gate_ok(tunnel)
 
     def _pid_alive(self, pid: int) -> bool:
+        # Windows: os.kill(pid, 0) NO es fiable para comprobar vida (lanza
+        # WinError 87 incluso para procesos vivos), lo que hacia que el
+        # supervisor creyera muertos a tuneles sanos y los relanzara en
+        # bucle (flapping). Usar la API nativa no-destructiva.
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                STILL_ACTIVE = 259
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                handle = kernel32.OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION, False, wintypes.DWORD(pid))
+                if not handle:
+                    return False  # proceso inexistente
+                try:
+                    code = wintypes.DWORD()
+                    if kernel32.GetExitCodeProcess(
+                            handle, ctypes.byref(code)):
+                        return code.value == STILL_ACTIVE
+                    return True
+                finally:
+                    kernel32.CloseHandle(wintypes.HANDLE(handle))
+            except Exception:  # noqa: BLE001 - a lo seguro: no matar por dudoso
+                return True
         try:
             os.kill(pid, 0)
             return True
         except (OSError, SystemError):
-            # En Windows os.kill(pid,0) con proceso inexistente puede lanzar
-            # SystemError (WinError 87) en vez de OSError (bug de CPython).
             return False
 
     def _gate_ok(self, tunnel: Tunnel) -> bool:

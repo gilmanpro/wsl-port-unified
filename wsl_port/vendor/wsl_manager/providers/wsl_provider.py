@@ -123,15 +123,20 @@ class WslProvider:
         Path(install_dir).mkdir(parents=True, exist_ok=True)
         return self._wsl(["--import", name, install_dir, source], timeout=600)
 
-    def install_new(self, name: str, no_launch: bool = True) -> CommandResult:
-        """Instala una distro nueva desde el catalogo de WSL (wsl --install).
+    def install_new(self, name: str, no_launch: bool = True,
+                    custom_name: str = "") -> CommandResult:
+        """Instala una nueva distro WSL desde el catalogo (wsl --install).
 
         Descarga y registra la distro sin arrancarla. Requiere internet y
-        puede tardar varios minutos.
+        puede tardar varios minutos. Con custom_name (--name) se registra con
+        ese nombre, permitiendo instalar el mismo SO varias veces sin
+        conflicto de nombre.
         """
         args = ["--install", "--distribution", name]
         if no_launch:
             args.append("--no-launch")
+        if custom_name:
+            args += ["--name", custom_name]
         return self._wsl(args, timeout=1800)
 
     def set_default(self, name: str) -> CommandResult:

@@ -538,6 +538,19 @@ class Supervisor:
                 summary["tunnels"][t.id] = {"state": STATE_RUNNING}
                 continue
 
+            # El cliente ssh esta vivo pero el gate (servicio local) no
+            # responde: NO relanzar (otro ssh peleaba el bind remoto y
+            # ambos caian -> flapping). Esperar a que vuelva el servicio.
+            if getattr(provider, "is_process_alive", lambda _t: False)(t):
+                self.tunnel_state[t.id] = STATE_WAITING
+                self.tunnel_reason[t.id] = (
+                    f"sin servicio local en {t.ssh_dest} (health gate)")
+                summary["tunnels"][t.id] = {
+                    "state": STATE_WAITING,
+                    "error": self.tunnel_reason[t.id],
+                }
+                continue
+
             # Muerto: diagnostica el porque (tail del log ssh) y backoff.
             reason = None
             try:

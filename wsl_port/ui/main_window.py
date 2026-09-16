@@ -1042,25 +1042,53 @@ class MainWindow:
         if not available:
             available = ["Ubuntu", "Debian", "kali-linux", "openSUSE-42",
                          "Ubuntu-20.04", "Ubuntu-22.04", "Ubuntu-24.04"]
+        existing = {str(d.get("name", "")).lower() for d in core.distros(skip_ips=True)}
+
         def _validate(data):
             if not data.get("name", "").strip():
                 raise ValueError("Selecciona una distro")
-        fields = [("name", "Distro a instalar", "combo")]
+            custom = data.get("custom", "").strip()
+            if custom:
+                import re as _re
+                if not _re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", custom):
+                    raise ValueError(
+                        "Nombre no valido: usa solo letras, numeros, '-', '.' o '_'"
+                        " (sin espacios, no puede empezar con guion).")
+                if custom.lower() in existing:
+                    raise ValueError(
+                        f"Ya existe una distro llamada '{custom}'.\n"
+                        "Elige otro nombre (ej: Kali-Work, Kali-Test).")
+        fields = [
+            ("name", "Distro a instalar", "combo"),
+            ("custom", "Nombre (opcional)", "entry"),
+        ]
         dlg = _FormDialog(self.root, "Crear nueva distro WSL", fields,
-                          validate=_validate, size=(350, 180))
+                          validate=_validate, size=(420, 220))
         dlg.set_combo_values("name", available)
         self.root.wait_window(dlg)
         if not dlg.result:
             return
         distro_name = dlg.result["name"].strip()
-        self._notify("Crear distro", f"Instalando {distro_name}...")
+        custom_name = dlg.result.get("custom", "").strip()
+        # --name solo si es distinto del nombre del catalogo (evita conflicto
+        # al instalar el mismo SO varias veces)
+        reg_name = (custom_name
+                    if custom_name and custom_name.lower() != distro_name.lower()
+                    else "")
+        label = reg_name or distro_name
+        self._notify("Crear distro", f"Instalando {label}...")
         def _work():
-            messagebox.showinfo("Crear distro",
-                                f"Instalando '{distro_name}'...\nEsto puede tardar varios minutos.")
-            r = core.create_distro(distro_name, no_launch=True)
+            messagebox.showinfo(
+                "Crear distro",
+                f"Instalando '{distro_name}'"
+                + (f" con el nombre '{reg_name}'" if reg_name else "")
+                + "...\nEsto puede tardar varios minutos.")
+            r = core.create_distro(distro_name, no_launch=True,
+                                   custom_name=reg_name)
             if r.get("ok"):
-                self._notify("Crear distro", f"Distro '{distro_name}' instalada")
-                messagebox.showinfo("Crear distro", f"Distro '{distro_name}' instalada correctamente")
+                self._notify("Crear distro", f"Distro '{label}' instalada")
+                messagebox.showinfo("Crear distro",
+                                    f"Distro '{label}' instalada correctamente")
             else:
                 self._notify("Crear distro", f"Error: {r.get('error')}")
                 messagebox.showerror("Crear distro", f"Error: {r.get('error')}")

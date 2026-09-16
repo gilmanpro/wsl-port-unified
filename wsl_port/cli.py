@@ -123,10 +123,15 @@ def cmd_distro_clone(args) -> int:
 
 def cmd_distro_create(args) -> int:
     from . import core
-    print(f"Instalando distro '{args.name}'... (puede tardar varios minutos)")
-    r = core.create_distro(args.name, no_launch=not args.launch)
+    custom = getattr(args, "as_name", "") or ""
+    etiqueta = custom or args.name
+    print(f"Instalando distro '{args.name}'"
+          + (f" con nombre '{custom}'" if custom else "")
+          + "... (puede tardar varios minutos)")
+    r = core.create_distro(args.name, no_launch=not args.launch,
+                           custom_name=custom)
     if r.get("ok"):
-        print(f"Distro '{args.name}' instalada correctamente")
+        print(f"Distro '{etiqueta}' instalada correctamente")
     else:
         print(f"error: {r.get('error')}", file=sys.stderr)
     return 0 if r.get("ok") else 1
@@ -775,6 +780,9 @@ def build_parser() -> argparse.ArgumentParser:
     dcr = d_sub.add_parser("create", help="Crear nueva distro (wsl --install)")
     dcr.add_argument("name", help="Nombre de la distro (ej: Ubuntu, Debian)")
     dcr.add_argument("--launch", action="store_true", help="Arrancar despues de instalar")
+    dcr.add_argument("--as", dest="as_name", default="",
+                     help="Nombre de registro (permite instalar el mismo SO "
+                          "varias veces sin conflicto, ej: Kali-Work)")
     dcr.set_defaults(fn=cmd_distro_create)
     ddl = d_sub.add_parser("delete", help="Eliminar distro (wsl --unregister)")
     ddl.add_argument("name", help="Nombre de la distro a eliminar")

@@ -1465,6 +1465,13 @@ class WebPanel:
                 )
                 if not fwd.id or fwd.listen_port <= 0 or fwd.wsl_port <= 0:
                     return {"ok": False, "error": "id, listen_port y wsl_port son obligatorios"}
+                try:
+                    from wsl_port import core as _core
+                    conflict = _core._wsl_port_conflict(fwd.wsl_port, fwd.wsl_distro)
+                except Exception:  # noqa: BLE001 - el guard nunca debe romper
+                    conflict = None
+                if conflict:
+                    return {"ok": False, "error": conflict}
                 store.add_forward(fwd)
                 self.metrics.record_event("web_forward_add", forward_id=fwd.id)
                 return {"ok": True, "message": f"forward '{fwd.id}' creado"}
@@ -1920,6 +1927,13 @@ class WebPanel:
             vps = store.get_vps(vps_id)
             if not vps:
                 return {"ok": False, "error": f"VPS '{vps_id}' no existe"}
+            try:
+                from wsl_port import core as _core
+                conflict = _core._wsl_port_conflict(wsl_port, distro)
+            except Exception:  # noqa: BLE001 - el guard nunca debe romper
+                conflict = None
+            if conflict:
+                return {"ok": False, "error": conflict}
             tid = tunnel_name.strip() if tunnel_name and tunnel_name.strip() else f"pub-{distro.lower().replace(' ', '-')}-{wsl_port}"
             existing = store.get_tunnel(tid)
             if not existing:
