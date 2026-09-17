@@ -222,6 +222,9 @@ echo "TU-TOKEN-SECRETO" | wsl-port secrets set web_panel_token
 # Requiere: Authorization: Bearer <token>
 ```
 
+**Puerto WSL2 libre (aleatorio):** `http://127.0.0.1:8780/api/v1/ports/free`
+Devuelve un puerto TCP sin uso en WSL2 (ni escuchando en las distros, ni asignado a forwards/tunnels, ni ocupado por Windows). Parametros opcionales: `?count=N&min=2048&max=65535`. El dashboard tiene el boton "Libre" en los formularios de Publicar y Forwards.
+
 ### API REST (puerto 8781)
 
 ```bash

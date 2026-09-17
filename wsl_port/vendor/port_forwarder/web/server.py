@@ -11,6 +11,7 @@ Endpoints:
   GET  /api/v1/health         -> health check
   GET  /api/v1/vps            -> VPS registrados
   GET  /api/v1/distros        -> lista distros WSL
+  GET  /api/v1/ports/free     -> puerto WSL2 aleatorio disponible (params count, min, max)
   GET  /api/v1/distro/<name>/metrics -> metricas de una distro
   GET  /api/v1/distro/<name>/export -> exportar distro (descarga tar)
   POST /api/v1/distro/import  -> importar distro (subida tar)
@@ -697,6 +698,17 @@ class PanelHandler(BaseHTTPRequestHandler):
                 self._send(*_json(self.panel.distros_list()))
             elif path == "/api/v1/keepalive":
                 self._send(*_json(self.panel.keepalive_status()))
+            elif path == "/api/v1/ports/free":
+                q = parse_qs(parsed.query)
+                try:
+                    count = int(q.get("count", ["1"])[0])
+                    mn = int(q.get("min", ["2048"])[0])
+                    mx = int(q.get("max", ["65535"])[0])
+                except ValueError:
+                    self._deny(400, "count, min y max deben ser enteros")
+                    return
+                self._send(*_json(self.panel.free_port(
+                    count=count, min_port=mn, max_port=mx)))
             elif path == "/api/v1/mcp/settings":
                 store = self.panel.supervisor.store
                 cfg = store.cfg.mcp
@@ -1300,6 +1312,16 @@ class WebPanel:
         if ka is None:
             return {"ok": False, "error": "keepalive no disponible"}
         return {"ok": True, "keepalive": ka.status()}
+
+    def free_port(self, count: int = 1, min_port: int = 2048,
+                  max_port: int = 65535) -> dict[str, Any]:
+        """PUERTO_WSL2 aleatorio sin uso (ni en las distros ni en Windows)."""
+        from wsl_port import core as _core
+        try:
+            return _core.find_free_wsl_port(min_port=min_port,
+                                            max_port=max_port, count=count)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
 
     MCP_TUNNEL_ID = "mcp-to-vps"
 
@@ -2137,7 +2159,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <h2>Publicar en Internet (1 clic)</h2>
     <p class="muted text-sm" style="margin:8px 0 12px;">Publica un servicio WSL en Internet via tu VPS. Ej: puerto 9000 de Debian → http://TU-VPS:18097</p>
     <div class="form"><label>Distro:</label><select id="pub-distro"></select></div>
-    <div class="form"><label>Puerto WSL:</label><input id="pub-wslport" value="9000" style="width:80px"></div>
+    <div class="form"><label>Puerto WSL:</label><input id="pub-wslport" value="9000" style="width:80px"><button class="outline" data-cmd="pickFreePort:pub-wslport" title="Buscar un puerto WSL2 aleatorio sin uso">Libre</button><a class="muted text-sm" href="/api/v1/ports/free" target="_blank">/api/v1/ports/free</a></div>
     <div class="form"><label>VPS:</label><select id="pub-vps"></select></div>
     <div class="form"><label>Puerto publico:</label><input id="pub-port" value="18097" style="width:80px"></div>
     <div class="form"><label>Nombre tunnel:</label><input id="pub-name" placeholder="auto" style="width:150px"></div>
@@ -2223,7 +2245,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <div class="form"><label style="width:120px">ID:</label><input id="fwd-id" placeholder="mi-forward" style="width:200px"></div>
       <div class="form"><label style="width:120px">Puerto listen:</label><input id="fwd-listen" type="number" value="8080" style="width:100px"></div>
       <div class="form"><label style="width:120px">Distro:</label><select id="fwd-distro"></select></div>
-      <div class="form"><label style="width:120px">Puerto WSL:</label><input id="fwd-wslport" type="number" value="9000" style="width:100px"></div>
+      <div class="form"><label style="width:120px">Puerto WSL:</label><input id="fwd-wslport" type="number" value="9000" style="width:100px"><button class="outline" data-cmd="pickFreePort:fwd-wslport" title="Buscar un puerto WSL2 aleatorio sin uso">Libre</button></div>
       <div class="form"><label style="width:120px">Protocolo:</label><select id="fwd-proto"><option value="tcp">TCP</option><option value="udp">UDP</option></select></div>
       <div class="form"><button class="success" data-cmd="submitFwdForm">Crear Forward</button><button class="outline" data-cmd="toggleFwdForm">Cancelar</button></div>
     </div>
@@ -2510,6 +2532,15 @@ async function importDistro(){
       toast('Error: '+d.error,'err');
     }
   }catch(e){ activity('Error: '+e.message,'error'); toast('Error de conexion: '+e.message,'err'); }
+}
+async function pickFreePort(target){
+  const inp=document.getElementById(target); if(!inp) return;
+  activity('Buscando puerto WSL2 libre...','info');
+  try{
+    const d=await api('/api/v1/ports/free');
+    if(d.ok){ inp.value=d.port; activity('Puerto WSL2 libre: '+d.port,'success'); toast('Puerto '+d.port+' disponible','ok'); }
+    else { activity(d.error||'No hay puerto libre','error'); toast(d.error||'No hay puerto libre','err'); }
+  }catch(e){ activity('Error: '+e.message,'error'); toast('Error: '+e.message,'err'); }
 }
 function doPublish(){
   const distro=document.getElementById('pub-distro').value, wslport=parseInt(document.getElementById('pub-wslport').value), vps=document.getElementById('pub-vps').value, pubport=parseInt(document.getElementById('pub-port').value);

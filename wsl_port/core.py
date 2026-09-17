@@ -634,6 +634,120 @@ def _wsl_port_conflict(wsl_port: int, distro: str) -> str | None:
     return None
 
 
+def wsl_used_ports(names: list[str] | None = None) -> dict:
+    """Puertos TCP escuchados DENTRO de WSL2 (union de las distros encendidas).
+
+    En WSL2 (NAT) las distros comparten un unico namespace de red, por lo que
+    el union refleja lo que realmente esta ocupado. Usa `ss -ltn` como root
+    dentro de cada distro (mismo enfoque que wsl_port_owner).
+
+    Devuelve {"ok", "used": [puertos], "checked": [distros], "unknown": [distros
+    que no respondieron a ss]}.
+    """
+    from wsl_port.vendor.wsl_manager.utils.subprocess_async import run
+    if names is None:
+        names = [d.get("name", "") for d in distros(skip_ips=True)
+                 if d.get("running")
+                 and not str(d.get("name", "")).lower().startswith("docker-desktop")]
+    used: set[int] = set()
+    unknown: list[str] = []
+    for name in names:
+        if not name:
+            continue
+        try:
+            r = run(["wsl.exe", "-d", name, "-u", "root", "ss", "-ltn"],
+                    timeout=8, breaker=False)
+            out = (r.output or "") if r else ""
+        except Exception:  # noqa: BLE001
+            out = ""
+        if not out.strip():
+            unknown.append(name)  # sin ss / sin permisos: no se pudo sondear
+            continue
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[0] == "LISTEN":
+                tail = parts[3].rsplit(":", 1)
+                if len(tail) == 2 and tail[1].isdigit():
+                    used.add(int(tail[1]))
+    return {"ok": True, "used": sorted(used), "checked": names, "unknown": unknown}
+
+
+def _win_port_bindable(port: int) -> bool:
+    """True si Windows puede bindear `port` (nadie lo tiene ocupado en Windows)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
+def find_free_wsl_port(min_port: int = 2048, max_port: int = 65535,
+                       count: int = 1) -> dict:
+    """Un puerto TCP ALEATORIO disponible para WSL2 (sin uso real).
+
+    Descarta:
+      - puertos escuchando dentro de las distros WSL encendidas (ss -ltn),
+      - puertos asignados a forwards/tunnels ya configurados,
+      - puertos ocupados por listeners de Windows (bind test).
+
+    Devuelve {"ok", "port", "ports", "range", "used_wsl", "checked_distros", ...}.
+    """
+    import random
+    try:
+        min_port = max(1, int(min_port))
+        max_port = min(65535, int(max_port))
+        count = max(1, min(20, int(count)))
+    except (TypeError, ValueError):
+        return {"ok": False,
+                "error": "min_port, max_port y count deben ser enteros"}
+    if min_port > max_port:
+        return {"ok": False, "error": "min_port no puede ser mayor que max_port"}
+    try:
+        info = wsl_used_ports()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"no se pudo sondear WSL: {e}"}
+    used = set(info["used"])
+    try:
+        store = pf_store()
+        for f in store.cfg.forwards:
+            used.add(int(f.wsl_port))
+            used.add(int(f.listen_port))
+        for t in store.cfg.tunnels:
+            used.add(int(t.local_bind.port))
+    except Exception as e2:  # noqa: BLE001 - la config no debe bloquear la busqueda
+        log.warning("find_free_wsl_port: config no disponible: %s", e2)
+    candidates = [p for p in range(min_port, max_port + 1) if p not in used]
+    if not candidates:
+        return {"ok": False,
+                "error": f"todos los puertos {min_port}-{max_port} estan en uso"}
+    random.shuffle(candidates)
+    free: list[int] = []
+    for p in candidates:
+        if _win_port_bindable(p):
+            free.append(p)
+            if len(free) >= count:
+                break
+    if not free:
+        return {"ok": False, "error": "no se encontro un puerto libre"}
+    free.sort()
+    return {
+        "ok": True,
+        "port": free[0],
+        "ports": free,
+        "message": f"Puerto {free[0]} disponible en WSL2",
+        "range": [min_port, max_port],
+        "used_wsl": info["used"],
+        "checked_distros": info["checked"],
+        "unknown_distros": info["unknown"],
+    }
+
+
 def add_forward(fwd_id: str, listen_port: int, wsl_distro: str, wsl_port: int,
                 protocol: str = "tcp", auto_apply: bool = True,
                 listen_address: str = "0.0.0.0") -> dict:
