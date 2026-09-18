@@ -217,6 +217,41 @@ def build_tools(svc: AppService) -> list[dict]:
                "timeout": {"type": "number"}},
               lambda a: s.wsl_exec(a["distro"], a["command"],
                                    float(a.get("timeout", 120)))),
+        _tool("distro_list_available",
+              "Catalogo de distros WSL disponibles para instalar "
+              "(wsl --list --online).",
+              {}, lambda a: s.distros_available()),
+        _tool("distro_create",
+              "Crear/instalar una distro WSL desde el catalogo "
+              "(wsl --install -d <name>). custom_name la registra con otro "
+              "nombre para poder instalar el mismo SO varias veces.",
+              {"name": {"type": "string", "required": True},
+               "custom_name": {"type": "string"},
+               "no_launch": {"type": "boolean"}},
+              lambda a: s.distro_create(
+                  a["name"], custom_name=a.get("custom_name", ""),
+                  no_launch=bool(a.get("no_launch", True)))),
+        _tool("distro_clone",
+              "Clonar una distro WSL existente con un nombre nuevo "
+              "(export + import). Puede tardar varios minutos.",
+              {"name": {"type": "string", "required": True},
+               "new_name": {"type": "string", "required": True}},
+              lambda a: s.distro_clone(a["name"], a["new_name"])),
+        _tool("distro_export",
+              "Exportar una distro WSL a un archivo .tar "
+              "(wsl --export). Puede tardar varios minutos.",
+              {"name": {"type": "string", "required": True},
+               "target": {"type": "string", "required": True}},
+              lambda a: s.distro_export(a["name"], a["target"])),
+        _tool("distro_import",
+              "Importar un archivo .tar como distro WSL nueva "
+              "(wsl --import). install_dir opcional "
+              "(por defecto %LOCALAPPDATA%\\WSL\\<name>).",
+              {"source": {"type": "string", "required": True},
+               "name": {"type": "string", "required": True},
+               "install_dir": {"type": "string"}},
+              lambda a: s.distro_import(a["source"], a["name"],
+                                        a.get("install_dir", ""))),
     ]
 
 

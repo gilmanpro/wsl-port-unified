@@ -453,6 +453,87 @@ class AppService:
             "comando ejecutado" if r.ok else f"exit {r.exit_code}",
         )
 
+    # -- WSL: ciclo de vida de distros (crear / clonar / exportar / importar) ---------
+
+    def distros_available(self) -> dict[str, Any]:
+        """Catalogo de distros instalables (wsl --list --online)."""
+        from wsl_port import core
+
+        return self._ok(core.list_available_distros())
+
+    def distro_create(self, name: str, custom_name: str = "",
+                      no_launch: bool = True) -> dict[str, Any]:
+        """Instala una distro del catalogo; custom_name la registra con otro
+        nombre (permite el mismo SO varias veces)."""
+        from wsl_port import core
+
+        name = str(name or "").strip()
+        if not name:
+            return self._err("name es obligatorio")
+        r = core.create_distro(name, no_launch=bool(no_launch),
+                               custom_name=str(custom_name or "").strip())
+        if not r.get("ok"):
+            return self._err(r.get("error") or r.get("output")
+                             or f"fallo al instalar '{name}'")
+        reg = str(custom_name or "").strip() or name
+        return self._ok({"name": reg, "from_catalog": name},
+                        f"distro '{reg}' creada")
+
+    def distro_clone(self, name: str, new_name: str) -> dict[str, Any]:
+        """Clona una distro existente (export + import) con nombre nuevo."""
+        from wsl_port import core
+
+        name = str(name or "").strip()
+        new_name = str(new_name or "").strip()
+        if not name or not new_name:
+            return self._err("name y new_name son obligatorios")
+        if name.lower() == new_name.lower():
+            return self._err("new_name debe ser distinto de name")
+        r = core.clone(name, new_name)
+        if not r.get("ok"):
+            return self._err(r.get("error") or r.get("output")
+                             or f"fallo al clonar '{name}'")
+        return self._ok({"from": name, "clone": new_name},
+                        f"distro '{name}' clonada como '{new_name}'")
+
+    def distro_export(self, name: str, target: str) -> dict[str, Any]:
+        """Exporta una distro a un archivo .tar."""
+        from wsl_port import core
+
+        name = str(name or "").strip()
+        target = str(target or "").strip()
+        if not name or not target:
+            return self._err("name y target son obligatorios")
+        r = core.export_distro(name, target)
+        if not r.get("ok"):
+            return self._err(r.get("error") or r.get("output")
+                             or f"fallo al exportar '{name}'")
+        return self._ok({"name": name, "target": target},
+                        f"distro '{name}' exportada a {target}")
+
+    def distro_import(self, source: str, name: str,
+                      install_dir: str = "") -> dict[str, Any]:
+        """Importa un .tar como distro nueva (por defecto en %LOCALAPPDATA%\\WSL)."""
+        import os
+
+        from wsl_port import core
+
+        source = str(source or "").strip()
+        name = str(name or "").strip()
+        if not source or not name:
+            return self._err("source (tar) y name son obligatorios")
+        if not os.path.isfile(source):
+            return self._err(f"no existe el archivo '{source}'")
+        install_dir = str(install_dir or "").strip() or os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "WSL", name)
+        r = core.import_distro(source, name, install_dir)
+        if not r.get("ok"):
+            return self._err(r.get("error") or r.get("output")
+                             or f"fallo al importar '{name}'")
+        return self._ok({"name": name, "install_dir": r.get("install_dir"),
+                         "source": source},
+                        f"distro '{name}' importada")
+
     # -- maintenance / drift -------------------------------------------------------------
 
     def doctor(self) -> dict[str, Any]:

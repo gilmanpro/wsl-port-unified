@@ -240,7 +240,7 @@ export PORT_FORWARDER_TOKEN="mi-token"
 wsl-port mcp serve                       # Servidor MCP stdio
 ```
 
-**29 tools disponibles** para agentes LLM (Claude Code, Cursor, etc.)
+**39 tools disponibles** para agentes LLM (Claude Code, Cursor, etc.), incluyendo ciclo de vida de distros: `distro_create`, `distro_clone`, `distro_export`, `distro_import` y `distro_list_available`
 
 ---
 
